@@ -24,6 +24,7 @@ package v1
 import (
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -447,6 +448,11 @@ func (in *VerticalPodAutoscalerSpec) DeepCopyInto(out *VerticalPodAutoscalerSpec
 		in, out := &in.TargetRef, &out.TargetRef
 		*out = new(autoscalingv1.CrossVersionObjectReference)
 		**out = **in
+	}
+	if in.PodLabelSelector != nil {
+		in, out := &in.PodLabelSelector, &out.PodLabelSelector
+		*out = new(metav1.LabelSelector)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.UpdatePolicy != nil {
 		in, out := &in.UpdatePolicy, &out.UpdatePolicy

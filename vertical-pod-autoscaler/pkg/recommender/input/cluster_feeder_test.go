@@ -78,8 +78,8 @@ const (
 	testGcPeriod = time.Minute
 )
 
-// NewClusterState returns a new clusterState with no pods.
-func NewFakeClusterState(vpas map[model.VpaID]*model.Vpa, pods map[model.PodID]*model.PodState) *fakeClusterState {
+// newFakeClusterState returns a new clusterState with no pods.
+func newFakeClusterState(vpas map[model.VpaID]*model.Vpa, pods map[model.PodID]*model.PodState) *fakeClusterState {
 	return &fakeClusterState{
 		stubbedVPAs:  vpas,
 		stubbedPods:  pods,
@@ -411,6 +411,16 @@ func (c *testSpecClient) GetPodSpecs() ([]*spec.BasicPodSpec, error) {
 	return c.pods, nil
 }
 
+func (c *testSpecClient) GetPodSpecsWithSelector(selector labels.Selector) ([]*spec.BasicPodSpec, error) {
+	var filteredPods []*spec.BasicPodSpec
+	for _, pod := range c.pods {
+		if selector.Matches(labels.Set(pod.PodLabels)) {
+			filteredPods = append(filteredPods, pod)
+		}
+	}
+	return filteredPods, nil
+}
+
 func makeTestSpecClient(podLabels []map[string]string) spec.SpecClient {
 	pods := make([]*spec.BasicPodSpec, len(podLabels))
 	for i, l := range podLabels {
@@ -487,6 +497,67 @@ func TestClusterStateFeeder_LoadPods_ContainerTracking(t *testing.T) {
 
 }
 
+func TestClusterStateFeeder_LoadPods_PodLabelSelectorOptimization(t *testing.T) {
+	clusterState := model.NewClusterState(testGcPeriod)
+
+	// Create some test pods with different labels
+	podLabels := []map[string]string{
+		{"app": "test1", "version": "v1"},
+		{"app": "test2", "version": "v2"},
+		{"app": "different", "version": "v1"},
+	}
+	client := makeTestSpecClient(podLabels)
+
+	// Create a VPA with podLabelSelector
+	vpaID := model.VpaID{Namespace: "default", VpaName: "test-vpa"}
+	selector := parseLabelSelector("app=test1")
+	_ = clusterState.AddOrUpdateVpa(&vpa_types.VerticalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: vpaID.VpaName, Namespace: vpaID.Namespace},
+		Spec: vpa_types.VerticalPodAutoscalerSpec{
+			PodLabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test1"}},
+		},
+	}, selector)
+
+	feeder := clusterStateFeeder{
+		specClient:     client,
+		clusterState:   clusterState,
+		memorySaveMode: true, // Enable memory save mode to trigger optimization
+	}
+
+	// Test the optimization methods
+	assert.True(t, feeder.canUseSelectorBasedPodFetching())
+
+	optimizedPods, err := feeder.getPodSpecsWithSelectors()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(optimizedPods)) // Should only return the matching pod
+	assert.Equal(t, "test1", optimizedPods[0].PodLabels["app"])
+}
+
+func TestClusterStateFeeder_ValidateTargetRef_PodLabelSelector(t *testing.T) {
+	feeder := clusterStateFeeder{}
+
+	// Test VPA with only podLabelSelector (no targetRef) - should be valid
+	vpaWithSelector := &vpa_types.VerticalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+		Spec: vpa_types.VerticalPodAutoscalerSpec{
+			PodLabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+		},
+	}
+
+	valid, condition := feeder.validateTargetRef(context.TODO(), vpaWithSelector)
+	assert.True(t, valid, "VPA with podLabelSelector should be valid")
+	assert.Empty(t, condition.message, "Should not have error condition")
+
+	// Test VPA with neither targetRef nor podLabelSelector - should be invalid
+	vpaWithNeither := &vpa_types.VerticalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+		Spec:       vpa_types.VerticalPodAutoscalerSpec{},
+	}
+
+	valid, condition = feeder.validateTargetRef(context.TODO(), vpaWithNeither)
+	assert.False(t, valid, "VPA with neither targetRef nor podLabelSelector should be invalid")
+}
+
 func TestClusterStateFeeder_LoadPods_MemorySaverMode(t *testing.T) {
 	for _, tc := range []struct {
 		Name              string
@@ -541,7 +612,7 @@ func TestClusterStateFeeder_LoadPods_MemorySaverMode(t *testing.T) {
 				key := model.VpaID{VpaName: fmt.Sprintf("test-vpa-%d", i), Namespace: "default"}
 				vpas[key] = &model.Vpa{PodSelector: vpaLabel}
 			}
-			clusterState := NewFakeClusterState(vpas, nil)
+			clusterState := newFakeClusterState(vpas, nil)
 
 			feeder := clusterStateFeeder{
 				specClient:     makeTestSpecClient(tc.PodLabels),
@@ -552,7 +623,7 @@ func TestClusterStateFeeder_LoadPods_MemorySaverMode(t *testing.T) {
 			feeder.LoadPods()
 			assert.Len(t, clusterState.addedPods, tc.TrackedPods, "number of pods is not %d", tc.TrackedPods)
 
-			clusterState = NewFakeClusterState(vpas, nil)
+			clusterState = newFakeClusterState(vpas, nil)
 
 			feeder = clusterStateFeeder{
 				specClient:     makeTestSpecClient(tc.PodLabels),
@@ -635,7 +706,7 @@ func TestClusterStateFeeder_LoadRealTimeMetrics(t *testing.T) {
 	initContainer1MetricsSnapshots, _ := newContainerMetricsSnapshot(initContainer, 300, 3072)
 	containerMetricsSnapshots = append(containerMetricsSnapshots, initContainer1MetricsSnapshots)
 
-	clusterState := NewFakeClusterState(nil, pods)
+	clusterState := newFakeClusterState(nil, pods)
 
 	feeder := clusterStateFeeder{
 		memorySaveMode: false,
@@ -661,7 +732,7 @@ func TestClusterStateFeeder_LoadRealTimeMetrics(t *testing.T) {
 	extraContainerMetricsSnapshot, _ := newContainerMetricsSnapshot(extraContainer, 200, 2048)
 	containerMetricsSnapshots = append(containerMetricsSnapshots, extraContainerMetricsSnapshot)
 
-	clusterState = NewFakeClusterState(nil, pods)
+	clusterState = newFakeClusterState(nil, pods)
 
 	feeder = clusterStateFeeder{
 		memorySaveMode: true,
@@ -858,7 +929,7 @@ func TestFilterVPAsIgnoreNamespaces(t *testing.T) {
 
 func TestCanCleanupCheckpoints(t *testing.T) {
 	_, tctx := ktesting.NewTestContext(t)
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	namespace := "testNamespace"
 
 	_, err := client.CoreV1().Namespaces().Create(tctx, &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})

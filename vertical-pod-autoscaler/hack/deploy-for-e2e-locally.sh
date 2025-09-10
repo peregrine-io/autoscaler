@@ -20,6 +20,7 @@ set -o pipefail
 
 SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 BASE_NAME=$(basename $0)
+KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-kind}
 source "${SCRIPT_ROOT}/hack/lib/util.sh"
 
 ARCH=$(kube::util::host_arch)
@@ -82,9 +83,9 @@ for i in ${COMPONENTS}; do
     (cd ${SCRIPT_ROOT}/pkg/${i} && bash ./gencerts.sh e2e || true)
     kubectl apply -f ${SCRIPT_ROOT}/deploy/admission-controller-service.yaml
   fi
-  ALL_ARCHITECTURES=${ARCH} make --directory ${SCRIPT_ROOT}/pkg/${i} docker-build REGISTRY=${REGISTRY} TAG=${TAG}
-  docker tag ${REGISTRY}/vpa-${i}-${ARCH}:${TAG} ${REGISTRY}/vpa-${i}:${TAG}
-  kind load docker-image ${REGISTRY}/vpa-${i}:${TAG}
+  ALL_ARCHITECTURES=${ARCH} make --directory ${SCRIPT_ROOT}/pkg/${i} docker-build-local REGISTRY=${REGISTRY} TAG=${TAG}
+  docker tag ${REGISTRY}/vpa-${i}:${TAG} ${REGISTRY}/vpa-${i}:${TAG}
+  kind load docker-image ${REGISTRY}/vpa-${i}:${TAG} --name=${KIND_CLUSTER_NAME}
 done
 
 for i in ${COMPONENTS}; do
