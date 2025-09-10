@@ -22,7 +22,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
-             cluster-autoscaler/go.sum
              vertical-pod-autoscaler/go.sum
              vertical-pod-autoscaler/e2e/go.sum
              go.work.sum
@@ -47,5 +46,12 @@ jobs:
           args: --timeout=30m
           working-directory: vertical-pod-autoscaler
 
-      - name: Test
-        run: hack/for-go-proj.sh test
+      - name: Test VPA
+        run: |
+          cd vertical-pod-autoscaler
+          go test -count=1 -race $(go list ./... | grep -v /vendor/ | grep -v vertical-pod-autoscaler/e2e)
+          
+      - name: Test VPA E2E
+        run: |
+          cd vertical-pod-autoscaler/e2e
+          go test -run=None ./...
