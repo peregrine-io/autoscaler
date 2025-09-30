@@ -1,0 +1,20 @@
+apiVersion: v1
+entries:
+  vertical-pod-autoscaler:
+  - apiVersion: v2
+    appVersion: 1.5.0
+    created: "2025-09-30T21:54:31.35668627Z"
+    description: Automatically adjust resources for your workloads
+    digest: b8d366128381bb86196c4877e9b6e533fe307da18d3780bcedc596296fd1fc81
+    icon: https://github.com/kubernetes/kubernetes/raw/master/logo/logo.png
+    maintainers:
+    - email: kubernetes-sig-autoscaling@googlegroups.com
+      name: adrianmoisey
+    - email: kubernetes-sig-autoscaling@googlegroups.com
+      name: omerap12
+    name: vertical-pod-autoscaler
+    type: application
+    urls:
+    - https://github.com/peregrine-io/autoscaler/releases/download/cluster-autoscaler-chart-0.1.0/vertical-pod-autoscaler-0.1.0.tgz
+    version: 0.1.0
+generated: "2025-09-30T21:54:31.356696058Z"
